@@ -1,0 +1,9 @@
+{
+  "name": "oauth-auth-server",
+  "version": "1.0.0",
+  "description": "OAuth 2.0 Authorization Server demo",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "dev": "bun --watch run src/server.ts"
+  }
+}
