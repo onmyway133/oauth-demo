@@ -10,6 +10,14 @@ const clients = new Map<string, OAuthClient>([
       name: "Demo Client App",
     },
   ],
+  [
+    "pkce-spa",
+    {
+      secret: null,  // PKCE clients have no secret — the browser can't keep one safe
+      redirectUris: ["http://localhost:3002/callback.html"],
+      name: "PKCE Browser App",
+    },
+  ],
 ])
 
 export function getClient(clientId: string): OAuthClient | null {

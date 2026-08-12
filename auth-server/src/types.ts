@@ -1,5 +1,5 @@
 export interface OAuthClient {
-  secret: string
+  secret: string | null  // null = PKCE-only client (no secret)
   redirectUris: string[]
   name: string
 }
@@ -10,6 +10,8 @@ export interface AuthCode {
   userId: string
   state: string
   expiresAt: number
+  codeChallenge?: string        // PKCE: SHA256(code_verifier) base64url
+  codeChallengeMethod?: string  // always "S256" in practice
 }
 
 export interface AccessToken {

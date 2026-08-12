@@ -5,7 +5,14 @@ const codes = new Map<string, AuthCode>()
 
 const CODE_TTL_MS = 10 * 60 * 1000
 
-export function issueCode(clientId: string, redirectUri: string, userId: string, state: string): string {
+export function issueCode(
+  clientId: string,
+  redirectUri: string,
+  userId: string,
+  state: string,
+  codeChallenge?: string,
+  codeChallengeMethod?: string
+): string {
   const code = crypto.randomUUID()
   codes.set(code, {
     clientId,
@@ -13,6 +20,8 @@ export function issueCode(clientId: string, redirectUri: string, userId: string,
     userId,
     state,
     expiresAt: Date.now() + CODE_TTL_MS,
+    codeChallenge,
+    codeChallengeMethod,
   })
   return code
 }
