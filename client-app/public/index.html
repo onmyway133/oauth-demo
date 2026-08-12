@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OAuth Demo App</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f2f5; margin: 0; }
+    .card { background: white; padding: 2.5rem; border-radius: 10px; box-shadow: 0 2px 16px rgba(0,0,0,.1); width: 380px; text-align: center; }
+    h1 { font-size: 1.4rem; color: #111; margin-bottom: .5rem; }
+    p { color: #666; margin-bottom: 2rem; font-size: .95rem; }
+    .login-btn {
+      display: inline-block; padding: 12px 28px; background: #0066ff; color: white;
+      text-decoration: none; border-radius: 6px; font-size: 1rem; font-weight: 500;
+      transition: background .2s;
+    }
+    .login-btn:hover { background: #0055dd; }
+    .note { margin-top: 1.5rem; font-size: .8rem; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="font-size:2.5rem; margin-bottom:.8rem">🔐</div>
+    <h1>OAuth 2.0 Demo</h1>
+    <p>Click below to authorize this app using the OAuth 2.0 Authorization Code flow.</p>
+    <a class="login-btn" href="/login">Login with OAuth</a>
+    <p class="note">You will be redirected to the authorization server.<br>Use credentials: <code>alice</code> / <code>password123</code></p>
+  </div>
+</body>
+</html>
