@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Profile — PKCE Demo</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f2f5; margin: 0; }
+    .card { background: white; padding: 2.5rem; border-radius: 10px; box-shadow: 0 2px 16px rgba(0,0,0,.1); width: 420px; text-align: center; }
+    .avatar { width: 72px; height: 72px; border-radius: 50%; background: #7c3aed; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; color: white; margin: 0 auto 1rem; }
+    h2 { margin: 0 0 .3rem; font-size: 1.3rem; }
+    .email { color: #666; font-size: .9rem; margin-bottom: 1rem; }
+    .badge { display: inline-block; background: #ede9fe; color: #7c3aed; padding: 3px 10px; border-radius: 12px; font-size: .8rem; }
+    .note { margin-top: 1.2rem; font-size: .8rem; color: #999; line-height: 1.6; border-top: 1px solid #f0f0f0; padding-top: 1rem; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: .85em; }
+    .logout-btn { display: inline-block; margin-top: 1.2rem; padding: 10px 24px; background: #f44; color: white; border-radius: 6px; text-decoration: none; font-size: .95rem; border: none; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="avatar" id="avatar">?</div>
+    <h2 id="name">Loading…</h2>
+    <div class="email" id="email"></div>
+    <div><span class="badge" id="username"></span></div>
+    <p class="note">
+      The browser called <code>GET /userinfo</code> directly<br>
+      using the token from <code>sessionStorage</code>.<br>
+      No server session — the token <em>is</em> the credential.
+    </p>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+  </div>
+
+  <script>
+    async function loadProfile() {
+      const token = sessionStorage.getItem('access_token')
+      if (!token) {
+        window.location.href = '/'
+        return
+      }
+
+      // The browser calls /userinfo directly — no client-server in the middle
+      const res = await fetch('http://localhost:3000/userinfo', {
+        headers: { Authorization: 'Bearer ' + token },
+      })
+
+      if (!res.ok) {
+        sessionStorage.removeItem('access_token')
+        window.location.href = '/'
+        return
+      }
+
+      const user = await res.json()
+      document.getElementById('avatar').textContent = user.name[0].toUpperCase()
+      document.getElementById('name').textContent = user.name
+      document.getElementById('email').textContent = user.email
+      document.getElementById('username').textContent = '@' + user.username
+    }
+
+    function logout() {
+      sessionStorage.removeItem('access_token')
+      window.location.href = '/'
+    }
+
+    loadProfile().catch(() => window.location.href = '/')
+  </script>
+</body>
+</html>

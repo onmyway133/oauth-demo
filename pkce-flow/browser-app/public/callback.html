@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Callback — PKCE Demo</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f2f5; margin: 0; }
+    .card { background: white; padding: 2.5rem; border-radius: 10px; box-shadow: 0 2px 16px rgba(0,0,0,.1); width: 420px; text-align: center; }
+    .step { color: #666; font-size: .9rem; margin: .5rem 0; }
+    .step.done { color: #16a34a; }
+    .step.error { color: #dc2626; }
+    h2 { font-size: 1.2rem; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="font-size:2rem; margin-bottom:.8rem">⏳</div>
+    <h2 id="heading">Completing login…</h2>
+    <p id="step1" class="step">Verifying state parameter…</p>
+    <p id="step2" class="step">Exchanging auth code for access token…</p>
+    <p id="step3" class="step">Storing token in sessionStorage…</p>
+    <p id="error" style="color:red;display:none"></p>
+  </div>
+
+  <script>
+    async function handleCallback() {
+      const params = new URLSearchParams(window.location.search)
+      const code = params.get('code')
+      const returnedState = params.get('state')
+      const error = params.get('error')
+
+      if (error) {
+        showError('Access denied: ' + error)
+        return
+      }
+
+      // Step 1: verify state (CSRF protection)
+      const expectedState = sessionStorage.getItem('pkce_state')
+      if (!code || returnedState !== expectedState) {
+        showError('State mismatch — possible CSRF attack')
+        return
+      }
+      markDone('step1')
+
+      // Step 2: exchange auth code for access token using code_verifier (no client_secret!)
+      const codeVerifier = sessionStorage.getItem('pkce_code_verifier')
+      sessionStorage.removeItem('pkce_code_verifier')
+      sessionStorage.removeItem('pkce_state')
+
+      const tokenRes = await fetch('http://localhost:3000/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: 'pkce-spa',
+          code_verifier: codeVerifier,
+          redirect_uri: 'http://localhost:3002/callback.html',
+          // Notice: no client_secret here — PKCE replaces it
+        }),
+      })
+
+      const tokenData = await tokenRes.json()
+      if (!tokenData.access_token) {
+        showError('Token exchange failed: ' + JSON.stringify(tokenData))
+        return
+      }
+      markDone('step2')
+
+      // Step 3: store access token in sessionStorage (not a cookie, not localStorage)
+      // sessionStorage: cleared when tab closes, not accessible by other tabs
+      sessionStorage.setItem('access_token', tokenData.access_token)
+      markDone('step3')
+
+      document.getElementById('heading').textContent = 'Login successful!'
+      setTimeout(() => window.location.href = '/profile.html', 800)
+    }
+
+    function markDone(id) {
+      document.getElementById(id).classList.add('done')
+      document.getElementById(id).textContent = '✓ ' + document.getElementById(id).textContent
+    }
+
+    function showError(msg) {
+      document.getElementById('heading').textContent = 'Login failed'
+      const el = document.getElementById('error')
+      el.textContent = msg
+      el.style.display = 'block'
+    }
+
+    handleCallback().catch(e => showError(e.message))
+  </script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PKCE Demo App</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f2f5; margin: 0; }
+    .card { background: white; padding: 2.5rem; border-radius: 10px; box-shadow: 0 2px 16px rgba(0,0,0,.1); width: 420px; }
+    h1 { font-size: 1.4rem; color: #111; margin-bottom: .3rem; }
+    .subtitle { color: #666; font-size: .9rem; margin-bottom: 2rem; }
+    .login-btn { display: inline-block; padding: 12px 28px; background: #7c3aed; color: white; text-decoration: none; border-radius: 6px; font-size: 1rem; font-weight: 500; border: none; cursor: pointer; width: 100%; text-align: center; }
+    .login-btn:hover { background: #6d28d9; }
+    .note { margin-top: 1.5rem; font-size: .8rem; color: #999; line-height: 1.6; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: .85em; }
+    .badge { display: inline-block; background: #ede9fe; color: #7c3aed; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card" style="text-align:center">
+    <div style="font-size:2.5rem; margin-bottom:.8rem">🔏</div>
+    <div class="badge">PKCE Flow</div>
+    <h1>OAuth 2.0 PKCE Demo</h1>
+    <p class="subtitle">No server secret. The browser generates a one-time <strong>code_verifier</strong> and proves it owns the auth code.</p>
+    <button class="login-btn" onclick="startPkceLogin()">Login with PKCE</button>
+    <p class="note">
+      Credentials: <code>alice</code> / <code>password123</code><br><br>
+      Open DevTools → Network to see:<br>
+      • <code>code_challenge</code> in the /authorize redirect<br>
+      • <code>code_verifier</code> in the /token request (no <code>client_secret</code>)<br>
+      • <code>access_token</code> stored in <code>sessionStorage</code>, not a cookie
+    </p>
+  </div>
+
+  <script>
+    // Generate a cryptographically random code_verifier (43-128 chars, base64url)
+    function generateCodeVerifier() {
+      const array = new Uint8Array(96)
+      crypto.getRandomValues(array)
+      return btoa(String.fromCharCode(...array))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    }
+
+    // Compute code_challenge = BASE64URL(SHA256(code_verifier))
+    async function computeCodeChallenge(verifier) {
+      const encoded = new TextEncoder().encode(verifier)
+      const digest = await crypto.subtle.digest('SHA-256', encoded)
+      return btoa(String.fromCharCode(...new Uint8Array(digest)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    }
+
+    async function startPkceLogin() {
+      const codeVerifier = generateCodeVerifier()
+      const codeChallenge = await computeCodeChallenge(codeVerifier)
+      const state = crypto.randomUUID()
+
+      // Store in sessionStorage — survives the redirect to auth server and back
+      sessionStorage.setItem('pkce_code_verifier', codeVerifier)
+      sessionStorage.setItem('pkce_state', state)
+
+      const authUrl = new URL('http://localhost:3000/authorize')
+      authUrl.searchParams.set('response_type', 'code')
+      authUrl.searchParams.set('client_id', 'pkce-spa')
+      authUrl.searchParams.set('redirect_uri', 'http://localhost:3002/callback.html')
+      authUrl.searchParams.set('state', state)
+      authUrl.searchParams.set('code_challenge', codeChallenge)
+      authUrl.searchParams.set('code_challenge_method', 'S256')
+
+      window.location.href = authUrl.toString()
+    }
+  </script>
+</body>
+</html>

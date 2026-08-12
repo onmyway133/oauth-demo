@@ -6,193 +6,214 @@
   \___/_/   \_\__,_|\__|_| |_| |____/ \___|_| |_| |_|\___/
 ```
 
-> Build and run your own OAuth 2.0 Authorization Server to learn how real servers issue auth codes, exchange them for access tokens, and protect resources — all from scratch in Bun + TypeScript.
+> Build and run your own OAuth 2.0 Authorization Server, then learn the two most important flows — Authorization Code with a client secret, and PKCE for browser apps — all from scratch in Bun + TypeScript.
 
 ## Overview
 
-- **Authorization Code Flow** — the most secure OAuth 2.0 grant type for server-side apps
-- **Auth Server** — issues auth codes after user consent, then exchanges codes for access tokens
-- **Client Credentials** — registered `client_id` + `client_secret` identify the application
-- **Redirect URI** — must exactly match a pre-registered value (prevents open redirect attacks)
-- **State Parameter** — random nonce to prevent CSRF attacks on the callback endpoint
-- **Single-Use Codes** — auth codes expire in 10 minutes and are deleted after one use
-- **Bearer Token** — the access token sent as `Authorization: Bearer <token>` on API calls
-- **Protected Resource** — `/userinfo` rejects requests without a valid, non-expired token
+This repo contains three apps:
+
+| App | Port | Role |
+|-----|------|------|
+| `auth-server` | 3000 | The OAuth Authorization Server (shared by both flows) |
+| `auth-code-flow/client-server` | 3001 | A traditional server-side app that uses a `client_secret` |
+| `pkce-flow/browser-app` | 3002 | A pure browser SPA — all OAuth logic runs in browser JS |
+
+## When to use which flow
+
+| | Auth Code + Secret | PKCE |
+|---|---|---|
+| **You have a backend server?** | Yes | No (SPA / mobile) |
+| **`client_secret`?** | Yes — stored on server, never sent to browser | No — a browser can't keep a secret |
+| **Token lives in** | Server memory (session cookie is just a pointer) | Browser `sessionStorage` |
+| **Threat mitigated** | Attacker can't exchange intercepted auth code without the secret | Attacker can't exchange intercepted auth code without the `code_verifier` |
+| **Who calls `/userinfo`?** | The client-server (back-channel) | The browser directly |
+
+---
 
 ## Architecture
 
 ```
-  ┌─────────────────────────────────────────────────────────────────┐
-  │                         oauth-demo                              │
-  │                                                                 │
-  │  ┌──────────────────────┐       ┌───────────────────────────┐  │
-  │  │   client-app         │       │   auth-server             │  │
-  │  │   port 3001          │       │   port 3000               │  │
-  │  │                      │       │                           │  │
-  │  │  public/             │       │  /authorize  (login +     │  │
-  │  │    index.html        │◄─────►│              consent)     │  │
-  │  │    profile.html      │       │  /approve    (issue code) │  │
-  │  │                      │       │  /token      (code→token) │  │
-  │  │  src/server.ts       │       │  /userinfo   (protected)  │  │
-  │  │    /login            │       │                           │  │
-  │  │    /callback         │       │  In-memory stores:        │  │
-  │  │    /user             │       │    clients, users,        │  │
-  │  │    /logout           │       │    codes, tokens,         │  │
-  │  │                      │       │    sessions               │  │
-  │  └──────────────────────┘       └───────────────────────────┘  │
-  │                ▲                          ▲                     │
-  │                │                          │                     │
-  │                └─────────── Browser ──────┘                     │
-  └─────────────────────────────────────────────────────────────────┘
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │                            oauth-demo                                 │
+  │                                                                       │
+  │  ┌───────────────────────┐         ┌────────────────────────────────┐ │
+  │  │   auth-code-flow/     │         │   auth-server (port 3000)      │ │
+  │  │   client-server       │◄───────►│                                │ │
+  │  │   (port 3001)         │back-    │  /authorize  login + consent   │ │
+  │  │                       │channel  │  /approve    issue auth code   │ │
+  │  │  /login  → redirect   │         │  /token      code → token      │ │
+  │  │  /callback → exchange │         │  /userinfo   protected data    │ │
+  │  │  /user → session JSON │         │                                │ │
+  │  └───────────────────────┘         └───────────────────────────────-┘ │
+  │                                              ▲                        │
+  │  ┌───────────────────────┐                   │                        │
+  │  │   pkce-flow/          │   browser JS ─────┘                        │
+  │  │   browser-app         │   calls /token and /userinfo directly      │
+  │  │   (port 3002)         │                                            │
+  │  │                       │                                            │
+  │  │  index.html  login    │                                            │
+  │  │  callback.html        │                                            │
+  │  │  profile.html         │                                            │
+  │  └───────────────────────┘                                            │
+  │                ▲                                                       │
+  │                └──────────────── Browser ─────────────────────────────│
+  └───────────────────────────────────────────────────────────────────────┘
 ```
 
-## Sequence Diagram
+---
+
+## Auth Code + Secret Flow
+
+The client-server exchanges the auth code using a `client_secret` that never leaves the server.
 
 ```
-  Browser              client-app (3001)         auth-server (3000)
-    │                        │                          │
-    │── GET / ──────────────►│                          │
-    │◄─ index.html ──────────│                          │
-    │   [Login button]       │                          │
-    │                        │                          │
-    │── GET /login ─────────►│                          │
-    │                        │  [generate state nonce]  │
-    │◄─ 302 Location: ───────│                          │
-    │    /authorize?          │                          │
-    │      client_id          │                          │
-    │      redirect_uri       │                          │
-    │      response_type=code │                          │
-    │      state=<nonce>      │                          │
-    │                        │                          │
-    │── GET /authorize?... ──────────────────────────►  │
-    │◄─ 200 consent page ──────────────────────────── [validate client_id,
-    │   [login form]         │                          redirect_uri]
-    │                        │                          │
-    │── POST /login ─────────────────────────────────►  │
-    │   username, password   │                    [authenticate user,
-    │                        │                    create session cookie]
-    │◄─ 302 back to ─────────────────────────────────   │
-    │   /authorize           │                          │
-    │                        │                          │
-    │── GET /authorize?... ──────────────────────────►  │
-    │◄─ 200 consent page ─────────────────────────── [user logged in,
-    │   [Approve/Deny]       │                         show approve form]
-    │                        │                          │
-    │── POST /approve ───────────────────────────────►  │
-    │                        │               [generate single-use auth code]
-    │◄─ 302 Location: ───────────────────────────────   │
-    │    /callback?          │                          │
-    │      code=<authcode>   │                          │
-    │      state=<nonce>     │                          │
-    │                        │                          │
-    │── GET /callback?code= ►│                          │
-    │                        │  [verify state matches cookie]
-    │                        │                          │
-    │                        │── POST /token ──────────►│
-    │                        │   grant_type=authorization_code
-    │                        │   code, client_id,       │
-    │                        │   client_secret,         │
-    │                        │   redirect_uri      [validate code,
-    │                        │                    client credentials,
-    │                        │                    consume code (single-use)]
-    │                        │◄─ { access_token,        │
-    │                        │    token_type: "Bearer",  │
-    │                        │    expires_in: 3600 } ───│
-    │                        │                          │
-    │                        │── GET /userinfo ─────────►
-    │                        │   Authorization:         │
-    │                        │   Bearer <access_token>  │
-    │                        │                   [validate token,
-    │                        │                    look up user]
-    │                        │◄─ { sub, name,           │
-    │                        │    email, username } ────│
-    │                        │                          │
-    │                        │  [store user in session] │
-    │◄─ 302 /profile.html ───│                          │
-    │                        │                          │
-    │── GET /user ──────────►│                          │
-    │◄─ { name, email } ─────│                          │
-    │   [show profile]       │                          │
+  Browser           client-server (3001)        auth-server (3000)
+    │                      │                          │
+    │── GET /login ────────►│                          │
+    │                      │  [generate state nonce]  │
+    │◄─ 302 /authorize?... ─│                          │
+    │                       client_id                  │
+    │                       redirect_uri               │
+    │                       response_type=code         │
+    │                       state=<nonce>              │
+    │                                                  │
+    │── GET /authorize?... ───────────────────────────►│
+    │◄─ 200 login form ───────────────────────────── [validate client_id, redirect_uri]
+    │                                                  │
+    │── POST /login ──────────────────────────────────►│
+    │                                            [authenticate user, set session cookie]
+    │◄─ 302 back to /authorize ───────────────────────│
+    │                                                  │
+    │── GET /authorize (with session cookie) ─────────►│
+    │◄─ 200 consent form ───────────────────────────── │
+    │                                                  │
+    │── POST /approve ────────────────────────────────►│
+    │                                      [issue single-use auth code]
+    │◄─ 302 /callback?code=...&state=... ─────────────│
+    │                                                  │
+    │── GET /callback?code=... ────────────►│          │
+    │                      │  POST /token ─────────────►
+    │                      │  code + client_id         │
+    │                      │  + client_secret ←── only server knows this
+    │                      │  + redirect_uri  [validate, consume code]
+    │                      │◄─ { access_token } ───────│
+    │                      │                           │
+    │                      │  GET /userinfo ────────────►
+    │                      │  Authorization: Bearer ... │
+    │                      │◄─ { name, email } ─────────│
+    │                      │                           │
+    │                      │  [store in sessions Map]  │
+    │◄─ 302 /profile.html ─│                           │
+    │── GET /user ─────────►│                           │
+    │◄─ { name, email } ───│                           │
 ```
+
+---
+
+## PKCE Flow
+
+No client-server. The browser handles everything. `code_verifier` replaces the `client_secret`.
+
+```
+  Browser                                       auth-server (3000)
+    │                                                 │
+    │  [generate code_verifier = random 96 bytes]     │
+    │  [compute code_challenge = SHA256(verifier)]    │
+    │  [store verifier in sessionStorage]             │
+    │                                                 │
+    │── GET /authorize?                               │
+    │     client_id=pkce-spa                          │
+    │     code_challenge=<hash>    ──────────────────►│
+    │     code_challenge_method=S256             [store challenge with auth code]
+    │◄─ 200 login + consent page ─────────────────── │
+    │                                                 │
+    │── POST /login, POST /approve ──────────────────►│
+    │◄─ 302 /callback.html?code=...&state=... ────────│
+    │                                                 │
+    │  [read code_verifier from sessionStorage]       │
+    │                                                 │
+    │── POST /token                                   │
+    │     code                                        │
+    │     code_verifier=<original random>  ──────────►│
+    │     client_id=pkce-spa                    [SHA256(verifier) == stored challenge?]
+    │     (no client_secret!)              [yes → issue access token]
+    │◄─ { access_token } ────────────────────────────│
+    │                                                 │
+    │  [store access_token in sessionStorage]         │
+    │                                                 │
+    │── GET /userinfo                                 │
+    │     Authorization: Bearer <token>  ────────────►│
+    │◄─ { name, email } ─────────────────────────────│
+    │                                                 │
+    │  [show profile]                                 │
+```
+
+---
 
 ## Auth Server Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/authorize` | Validates `client_id`, `redirect_uri`, shows login + consent UI |
-| `POST` | `/login` | Authenticates user; redirects back to `/authorize` with session cookie |
-| `POST` | `/approve` | Issues single-use auth code; redirects to `redirect_uri?code=...` |
-| `POST` | `/token` | Exchanges auth code for access token; validates client secret |
-| `GET` | `/userinfo` | Returns user JSON; requires `Authorization: Bearer <token>` |
+| `GET` | `/authorize` | Validates `client_id`, `redirect_uri`. Accepts optional `code_challenge` + `code_challenge_method` for PKCE. Shows login + consent UI. |
+| `POST` | `/login` | Authenticates user. Redirects back to `/authorize` preserving PKCE params. |
+| `POST` | `/approve` | Issues single-use auth code (stores `code_challenge` if PKCE). Redirects to `redirect_uri`. |
+| `POST` | `/token` | Exchanges auth code. **PKCE**: requires `code_verifier`, verifies `SHA256(verifier) == code_challenge`. **Secret**: requires `client_secret`. |
+| `GET` | `/userinfo` | Returns `{ sub, name, email, username }`. Requires `Authorization: Bearer <token>`. CORS-enabled. |
 
-## Client App Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Login page with "Login with OAuth" button |
-| `GET` | `/login` | Redirects browser to auth server `/authorize` |
-| `GET` | `/callback` | Receives auth code, exchanges for token, fetches user info |
-| `GET` | `/user` | Returns current user from session (called by profile page) |
-| `GET` | `/logout` | Clears session; redirects to login page |
+---
 
 ## Setup
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) >= 1.0
-
-### Install
-
-No packages to install — uses only Bun built-ins.
-
-### Environment
-
-Copy `.env.example` and adjust if needed:
-
-```bash
-cp .env.example .env
-```
-
-Default values already match the demo — no changes required to run locally.
+[Bun](https://bun.sh) >= 1.0 — no other dependencies.
 
 ### Run
 
-Open two terminal tabs:
+Open three terminals:
 
 ```bash
-# Terminal 1 — Auth Server
+# Terminal 1 — Auth Server (shared by both flows)
 cd auth-server
 bun start
-# → OAuth Authorization Server running at http://localhost:3000
 
-# Terminal 2 — Client App
-cd client-app
+# Terminal 2 — Auth Code flow (server-side app with client_secret)
+cd auth-code-flow/client-server
 bun start
-# → OAuth Client App running at http://localhost:3001
+
+# Terminal 3 — PKCE flow (pure browser app)
+cd pkce-flow/browser-app
+bun start
 ```
+
+---
 
 ## Try It
 
-1. Open **http://localhost:3001** in your browser
-2. Click **Login with OAuth** — you are redirected to the auth server
-3. Enter credentials: **alice** / **password123**
-4. Click **Sign in** → consent screen appears
-5. Click **Approve** → redirected back to the client app
-6. Profile page shows Alice's name and email
+### Auth Code flow — http://localhost:3001
 
-### curl the API directly
+1. Open **http://localhost:3001** and click **Login with OAuth**
+2. Enter **alice** / **password123**, click Sign in → Approve
+3. Profile page appears
 
-After login, grab the access token from the server logs or by repeating the flow manually:
+**What to look for in DevTools:**
+- The `/token` request (sent by the server, not the browser) is invisible in the Network tab — it's a back-channel call
+- Browser only has a `client_session` cookie — no token visible anywhere
 
-```bash
-# Exchange a code (replace <code> with an actual code from the /approve redirect)
-curl -X POST http://localhost:3000/token \
-  -d "grant_type=authorization_code&code=<code>&client_id=demo-app&client_secret=demo-secret&redirect_uri=http://localhost:3001/callback"
+### PKCE flow — http://localhost:3002
 
-# Call the protected resource
-curl http://localhost:3000/userinfo \
-  -H "Authorization: Bearer <access_token>"
-```
+1. Open **http://localhost:3002** and click **Login with PKCE**
+2. Enter **alice** / **password123**, click Sign in → Approve
+3. Watch the callback.html progress steps, then profile page appears
+
+**What to look for in DevTools → Network:**
+- The `/authorize` request URL contains `code_challenge=...` (a SHA256 hash)
+- The `/token` request is visible — sent by the browser, contains `code_verifier` but **no `client_secret`**
+- DevTools → Application → Session Storage → http://localhost:3002 → `access_token` is there
+
+**The key difference:** in PKCE, the browser is doing the token exchange. In the Auth Code flow, the client-server does it back-channel so the browser never sees the token.
+
+---
 
 ## Demo Users
 
@@ -201,10 +222,12 @@ curl http://localhost:3000/userinfo \
 | alice | password123 | Alice Smith |
 | bob | password456 | Bob Jones |
 
+---
+
 ## What to explore next
 
-- Add **refresh tokens** so access tokens can be renewed without re-login
-- Add **PKCE** (Proof Key for Code Exchange) for public clients that can't store a secret
-- Store clients and tokens in a real database instead of in-memory Maps
-- Add **scopes** so users can grant partial access
-- Replace the session cookie with a **JWT** (`jose` library)
+- **Refresh tokens** — renew an expired access token without re-login
+- **JWT access tokens** — encode user info in the token itself (stateless); use the `jose` library
+- **Scopes** — let users grant partial access (`profile`, `email`, `write`)
+- **Real database** — replace in-memory Maps with SQLite via Bun's built-in `bun:sqlite`
+- **Token introspection** — `POST /introspect` endpoint for resource servers to validate opaque tokens
